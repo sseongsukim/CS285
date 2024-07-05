@@ -13,7 +13,7 @@ import time
 from cs285.infrastructure import pytorch_util as ptu
 
 
-def sample_trajectory(env, policy, max_path_length, render=False):
+def sample_trajectory(env, policy, max_path_length, render=False, expert= False):
     """Sample a rollout in the environment from a policy."""
     
     # initialize env for the beginning of a new rollout
@@ -64,7 +64,7 @@ def sample_trajectory(env, policy, max_path_length, render=False):
             "terminal": np.array(terminals, dtype=np.float32)}
 
 
-def sample_trajectories(env, policy, min_timesteps_per_batch, max_path_length, render=False):
+def sample_trajectories(env, policy, min_timesteps_per_batch, max_path_length, render=False, expert= False):
     """Collect rollouts until we have collected min_timesteps_per_batch steps."""
 
     timesteps_this_batch = 0
@@ -72,7 +72,7 @@ def sample_trajectories(env, policy, min_timesteps_per_batch, max_path_length, r
     while timesteps_this_batch < min_timesteps_per_batch:
 
         #collect rollout
-        path = sample_trajectory(env, policy, max_path_length, render)
+        path = sample_trajectory(env, policy, max_path_length, render, expert= False)
         paths.append(path)
 
         #count steps

@@ -1,6 +1,5 @@
 import itertools
 from torch import nn
-from torch.nn import functional as F
 from torch import optim
 
 import numpy as np
@@ -14,11 +13,11 @@ class ValueCritic(nn.Module):
     """Value network, which takes an observation and outputs a value for that observation."""
 
     def __init__(
-        self,
-        ob_dim: int,
-        n_layers: int,
-        layer_size: int,
-        learning_rate: float,
+            self,
+            ob_dim: int,
+            n_layers: int,
+            layer_size: int,
+            learning_rate: float,
     ):
         super().__init__()
 
@@ -36,15 +35,20 @@ class ValueCritic(nn.Module):
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         # TODO: implement the forward pass of the critic network
-        pass
-        
+        x = self.network(obs)
+        return x
 
     def update(self, obs: np.ndarray, q_values: np.ndarray) -> dict:
         obs = ptu.from_numpy(obs)
         q_values = ptu.from_numpy(q_values)
 
         # TODO: update the critic using the observations and q_values
-        loss = None
+        pred = self.forward(obs).squeeze()
+        loss = torch.nn.functional.mse_loss(pred, q_values)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
 
         return {
             "Baseline Loss": ptu.to_numpy(loss),

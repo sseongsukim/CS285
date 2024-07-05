@@ -20,6 +20,12 @@ from cs285.infrastructure.replay_buffer import ReplayBuffer
 from cs285.policies.MLP_policy import MLPPolicySL
 from cs285.policies.loaded_gaussian_policy import LoadedGaussianPolicy
 
+# Additional libraries
+import wandb
+import imageio
+from time import gmtime
+from pathlib import Path
+
 
 # how many rollouts to save as videos to tensorboard
 MAX_NVIDEO = 2
@@ -112,6 +118,28 @@ def run_training_loop(params):
     # init vars at beginning of training
     total_envsteps = 0
     start_time = time.time()
+
+    # Wandb Log
+    env_name = params["env_name"]
+    use_wandb = True
+    if use_wandb:
+        now = time.time()
+        year, mon, mday, minute = gmtime(now).tm_year, gmtime(now).tm_mon, gmtime(now).tm_mday, gmtime(now).tm_min
+        index = f"{env_name}_{int(mon)}-{int(mday)}-{int(minute)}"
+        log_dir = Path('wandb_log').expanduser() / index
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
+        video_dir = str(log_dir / 'videos')
+        Path(video_dir).mkdir(exist_ok=True)
+        wandb.init(
+            entity="goto-rl",
+            project="cs285-hw1",
+            resume=index,
+            config=params,
+            dir=log_dir,
+            mode='online'
+        )
+        wandb.save()
+
 
     for itr in range(params['n_iter']):
         print("\n\n********** Iteration %i ************"%itr)

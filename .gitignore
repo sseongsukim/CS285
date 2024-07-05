@@ -5,7 +5,10 @@ __pycache__/
 
 # C extensions
 *.so
-
+*.mp4
+*.seongsu
+*.log
+*.json
 # Distribution / packaging
 .Python
 build/

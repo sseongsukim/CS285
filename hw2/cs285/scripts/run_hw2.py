@@ -1,23 +1,26 @@
-import os
-import time
-
 from cs285.agents.pg_agent import PGAgent
-
 import os
 import time
+from time import gmtime
 
 import gym
 import numpy as np
+import imageio
 import torch
+
+from pathlib import Path
+import tqdm
+
+import wandb
+
 from cs285.infrastructure import pytorch_util as ptu
 
 from cs285.infrastructure import utils
 from cs285.infrastructure.logger import Logger
 from cs285.infrastructure.action_noise_wrapper import ActionNoiseWrapper
 
+
 MAX_NVIDEO = 2
-
-
 def run_training_loop(args):
     logger = Logger(args.logdir)
 
@@ -46,6 +49,26 @@ def run_training_loop(args):
     else:
         fps = env.env.metadata["render_fps"]
 
+    # Wandb
+    use_wandb = True
+    if use_wandb:
+        now = time.time()
+        year, mon, mday, minute = gmtime(now).tm_year, gmtime(now).tm_mon, gmtime(now).tm_mday, gmtime(now).tm_min
+        index = f"{args.env_name}_{int(mon)}-{int(mday)}-{int(minute)}_use_reward_to_go_{args.use_reward_to_go}_normalize_advantages_{args.normalize_advantages}_batch_size_{args.batch_size}_baseline_{args.use_baseline}"
+        log_dir = Path('wandb_log').expanduser() / index
+        Path(log_dir).mkdir(parents= True, exist_ok=True)
+        video_dir = str(log_dir / 'videos')
+        Path(video_dir).mkdir(exist_ok=True)
+        wandb.init(
+            entity="goto-rl",
+            project="hw2",
+            resume= index,
+            config= vars(args),
+            dir= log_dir,
+            mode= 'online'
+        )
+        wandb.save()
+
     # initialize agent
     agent = PGAgent(
         ob_dim,
@@ -66,11 +89,17 @@ def run_training_loop(args):
     total_envsteps = 0
     start_time = time.time()
 
-    for itr in range(args.n_iter):
+    for itr in range(args.n_iter + 1):
+
         print(f"\n********** Iteration {itr} ************")
         # TODO: sample `args.batch_size` transitions using utils.sample_trajectories
         # make sure to use `max_ep_len`
-        trajs, envsteps_this_batch = None, None  # TODO
+        trajs, envsteps_this_batch = utils.sample_trajectories(
+            env= env,
+            policy= agent.actor,
+            min_timesteps_per_batch= args.batch_size,
+            max_length= max_ep_len,
+        )
         total_envsteps += envsteps_this_batch
 
         # trajs should be a list of dictionaries of NumPy arrays, where each dictionary corresponds to a trajectory.
@@ -78,7 +107,12 @@ def run_training_loop(args):
         trajs_dict = {k: [traj[k] for traj in trajs] for k in trajs[0]}
 
         # TODO: train the agent using the sampled trajectories and the agent's update function
-        train_info: dict = None
+        train_info = agent.update(
+            obs= trajs_dict["observation"],
+            actions= trajs_dict["action"],
+            rewards= trajs_dict["reward"],
+            terminals= trajs_dict["terminal"],
+        )
 
         if itr % args.scalar_log_freq == 0:
             # save eval metrics
@@ -101,6 +135,8 @@ def run_training_loop(args):
             for key, value in logs.items():
                 print("{} : {}".format(key, value))
                 logger.log_scalar(value, key, itr)
+                if use_wandb:
+                    wandb.log({f'{key}': value}, step= itr)
             print("Done logging...\n\n")
 
             logger.flush()
@@ -110,6 +146,13 @@ def run_training_loop(args):
             eval_video_trajs = utils.sample_n_trajectories(
                 env, agent.actor, MAX_NVIDEO, max_ep_len, render=True
             )
+            if use_wandb:
+                num_of_videos = len(eval_video_trajs)
+                for i in range(num_of_videos):
+                    video = eval_video_trajs[i]["image_obs"]
+                    video_file_name = f'{video_dir}/iteration_{itr}_{i + 1}.mp4'
+                    imageio.mimsave(video_file_name, video, fps=30)
+                    wandb.log({f"video_{i}": wandb.Video(video_file_name, fps=4, format= "mp4")})
 
             logger.log_trajs_as_videos(
                 eval_video_trajs,
@@ -122,11 +165,10 @@ def run_training_loop(args):
 
 def main():
     import argparse
-
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env_name", type=str, required=True)
-    parser.add_argument("--exp_name", type=str, required=True)
-    parser.add_argument("--n_iter", "-n", type=int, default=200)
+    parser.add_argument("--env_name", type=str, required=False, default= "CartPole-v0")
+    parser.add_argument("--exp_name", type=str, required=False, default= "cartpole")
+    parser.add_argument("--n_iter", "-n", type=int, default=100)
 
     parser.add_argument("--use_reward_to_go", "-rtg", action="store_true")
     parser.add_argument("--use_baseline", action="store_true")
@@ -152,9 +194,8 @@ def main():
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--no_gpu", "-ngpu", action="store_true")
     parser.add_argument("--which_gpu", "-gpu_id", default=0)
-    parser.add_argument("--video_log_freq", type=int, default=-1)
+    parser.add_argument("--video_log_freq", type=int, default= 10)
     parser.add_argument("--scalar_log_freq", type=int, default=1)
-
     parser.add_argument("--action_noise_std", type=float, default=0)
 
     args = parser.parse_args()
