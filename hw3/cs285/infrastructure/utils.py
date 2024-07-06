@@ -7,12 +7,13 @@ import cv2
 from cs285.infrastructure import pytorch_util as ptu
 from typing import Dict, Tuple, List
 
+
 ############################################
 ############################################
 
 
 def sample_trajectory(
-    env: gym.Env, policy: MLPPolicy, max_length: int, render: bool = False
+        env: gym.Env, policy: MLPPolicy, max_length: int, render: bool = False
 ) -> Dict[str, np.ndarray]:
     """Sample a rollout in the environment from a policy."""
     ob = env.reset()
@@ -26,7 +27,7 @@ def sample_trajectory(
                 img = env.sim.render(camera_name="track", height=500, width=500)[::-1]
             else:
                 img = env.render(mode="rgb_array")
-            
+
             if isinstance(img, list):
                 img = img[0]
 
@@ -75,11 +76,11 @@ def sample_trajectory(
 
 
 def sample_trajectories(
-    env: gym.Env,
-    policy: MLPPolicy,
-    min_timesteps_per_batch: int,
-    max_length: int,
-    render: bool = False,
+        env: gym.Env,
+        policy: MLPPolicy,
+        min_timesteps_per_batch: int,
+        max_length: int,
+        render: bool = False,
 ) -> Tuple[List[Dict[str, np.ndarray]], int]:
     """Collect rollouts using policy until we have collected min_timesteps_per_batch steps."""
     timesteps_this_batch = 0
@@ -95,7 +96,7 @@ def sample_trajectories(
 
 
 def sample_n_trajectories(
-    env: gym.Env, policy: MLPPolicy, ntraj: int, max_length: int, render: bool = False
+        env: gym.Env, policy: MLPPolicy, ntraj: int, max_length: int, render: bool = False
 ):
     """Collect ntraj rollouts."""
     trajs = []

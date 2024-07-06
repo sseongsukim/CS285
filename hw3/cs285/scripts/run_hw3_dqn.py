@@ -20,6 +20,12 @@ from cs285.infrastructure.replay_buffer import MemoryEfficientReplayBuffer, Repl
 
 from scripting_utils import make_logger, make_config
 
+from collections import OrderedDict
+import wandb
+import imageio
+from pathlib import Path
+from time import gmtime
+
 MAX_NVIDEO = 2
 
 
@@ -29,6 +35,27 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
     torch.manual_seed(args.seed)
     ptu.init_gpu(use_gpu=not args.no_gpu, gpu_id=args.which_gpu)
 
+    # Wandb
+    use_wandb = True
+    config_name = args.config_file
+    config_name = config_name.split("/")[-1]
+    if use_wandb:
+        now = time.time()
+        year, mon, mday, minute = gmtime(now).tm_year, gmtime(now).tm_mon, gmtime(now).tm_mday, gmtime(now).tm_min
+        index = f"DQN_{config_name}_{int(mon)}-{int(mday)}-{int(minute)}_{args.seed}"
+        log_dir = Path('wandb_log').expanduser() / index
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
+        video_dir = str(log_dir / 'videos')
+        Path(video_dir).mkdir(exist_ok=True)
+        wandb.init(
+            entity="goto-rl",
+            project="hw3",
+            resume=index,
+            config=vars(args),
+            dir=log_dir,
+            mode='online'
+        )
+        wandb.save()
     # make the gym environment
     env = config["make_env"]()
     eval_env = config["make_env"]()
@@ -89,28 +116,43 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
 
     for step in tqdm.trange(config["total_steps"], dynamic_ncols=True):
         epsilon = exploration_schedule.value(step)
-        
+
         # TODO(student): Compute action
-        action = ...
+        action = agent.get_action(
+            observation=observation,
+            epsilon=epsilon,
+        )
 
         # TODO(student): Step the environment
-
+        next_observation, reward, done, info = env.step(action)
         next_observation = np.asarray(next_observation)
         truncated = info.get("TimeLimit.truncated", False)
+        done = done or truncated
 
         # TODO(student): Add the data to the replay buffer
         if isinstance(replay_buffer, MemoryEfficientReplayBuffer):
             # We're using the memory-efficient replay buffer,
             # so we only insert next_observation (not observation)
-            ...
+            replay_buffer.insert(
+                action=action,
+                reward=reward,
+                next_observation=next_observation[-1],
+                done=done
+            )
+
         else:
             # We're using the regular replay buffer
-            ...
+            replay_buffer.insert(
+                observation=observation,
+                action=action,
+                reward=reward,
+                next_observation=next_observation,
+                done=done,
+            )
 
         # Handle episode termination
         if done:
             reset_env_training()
-
             logger.log_scalar(info["episode"]["r"], "train_return", step)
             logger.log_scalar(info["episode"]["l"], "train_ep_len", step)
         else:
@@ -119,13 +161,20 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
         # Main DQN training loop
         if step >= config["learning_starts"]:
             # TODO(student): Sample config["batch_size"] samples from the replay buffer
-            batch = ...
+            batch = replay_buffer.sample(batch_size=config["batch_size"])
 
             # Convert to PyTorch tensors
             batch = ptu.from_numpy(batch)
 
             # TODO(student): Train the agent. `batch` is a dictionary of numpy arrays,
-            update_info = ...
+            update_info = agent.update(
+                obs=batch["observations"],
+                action=batch["actions"],
+                reward=batch["rewards"],
+                next_obs=batch["next_observations"],
+                done=batch["dones"],
+                step=step,
+            )
 
             # Logging code
             update_info["epsilon"] = epsilon
@@ -135,6 +184,10 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
                 for k, v in update_info.items():
                     logger.log_scalar(v, k, step)
                 logger.flush()
+
+                if use_wandb:
+                    for k, v in update_info.items():
+                        wandb.log({f"{k}": v})
 
         if step % args.eval_interval == 0:
             # Evaluate
@@ -158,6 +211,20 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
                 logger.log_scalar(np.max(ep_lens), "eval/ep_len_max", step)
                 logger.log_scalar(np.min(ep_lens), "eval/ep_len_min", step)
 
+            # Wandb
+            if use_wandb:
+                wandb_dict = OrderedDict()
+                wandb_dict["eval_return"] = np.mean(returns)
+                wandb_dict["eval_ep_len"] = np.mean(ep_lens)
+                wandb_dict["eval/eval_ep_len_std"] = np.std(ep_lens)
+                wandb_dict["eval/eval_ep_len_max"] = np.max(ep_lens)
+                wandb_dict["eval/eval_ep_len_min"] = np.min(ep_lens)
+                wandb_dict["eval/return_std"] = np.std(returns)
+                wandb_dict["eval/return_max"] = np.max(returns)
+                wandb_dict["eval/return_min"] = np.min(returns)
+                for k, v in wandb_dict.items():
+                    wandb.log({f"{k}": v}, step=step)
+
             if args.num_render_trajectories > 0:
                 video_trajectories = utils.sample_n_trajectories(
                     render_env,
@@ -167,6 +234,14 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
                     render=True,
                 )
 
+                if use_wandb:
+                    length = len(video_trajectories)
+                    for i in range(length):
+                        videos = video_trajectories[i]["image_obs"]
+                        video_file_name = f'{video_dir}/iteration_{step}_{i + 1}.mp4'
+                        imageio.mimsave(video_file_name, videos, fps=30)
+                        wandb.log({f"video_{i}": wandb.Video(video_file_name, fps=4, format="mp4")})
+
                 logger.log_paths_as_videos(
                     video_trajectories,
                     step,
@@ -175,14 +250,13 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
                     video_title="eval_rollouts",
                 )
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config_file", "-cfg", type=str, required=True)
 
     parser.add_argument("--eval_interval", "-ei", type=int, default=10000)
     parser.add_argument("--num_eval_trajectories", "-neval", type=int, default=10)
-    parser.add_argument("--num_render_trajectories", "-nvid", type=int, default=0)
+    parser.add_argument("--num_render_trajectories", "-nvid", type=int, default=1)
 
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--no_gpu", "-ngpu", action="store_true")
