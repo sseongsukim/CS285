@@ -59,20 +59,21 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
         fps = env.env.metadata["render_fps"]
 
     # Wandb
-    use_wandb = True
+    use_wandb = False
     config_name = args.config_file
     config_name = config_name.split("/")[-1]
     if use_wandb:
         now = time.time()
         year, mon, mday, minute = gmtime(now).tm_year, gmtime(now).tm_mon, gmtime(now).tm_mday, gmtime(now).tm_min
-        index = f"SAC_{config_name}_{int(mon)}-{int(mday)}-{int(minute)}"
+        sc = gmtime(now).tm_secz
+        index = f"SAC_{config_name}_{int(mon)}-{int(mday)}-{int(minute)}_{sc}_lab"
         log_dir = Path('wandb_log').expanduser() / index
         Path(log_dir).mkdir(parents=True, exist_ok=True)
         video_dir = str(log_dir / 'videos')
         Path(video_dir).mkdir(exist_ok=True)
         wandb.init(
             entity="goto-rl",
-            project="cs285-hw3",
+            project="hw3",
             resume=index,
             config=vars(args),
             dir=log_dir,
@@ -136,7 +137,6 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
             if step % args.log_interval == 0:
                 for k, v in update_info.items():
                     logger.log_scalar(v, k, step)
-                    logger.log_scalars
                 logger.flush()
                 if use_wandb:
                     for k, v in update_info.items():
@@ -207,11 +207,11 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file", "-cfg", type=str, required=True)
+    parser.add_argument("--config_file", "-cfg", type=str, required= False, default= "../../experiments/sac/halfcheetah_reinforce10.yaml")
 
     parser.add_argument("--eval_interval", "-ei", type=int, default=5000)
     parser.add_argument("--num_eval_trajectories", "-neval", type=int, default=10)
-    parser.add_argument("--num_render_trajectories", "-nvid", type=int, default=0)
+    parser.add_argument("--num_render_trajectories", "-nvid", type=int, default=1)
 
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--no_gpu", "-ngpu", action="store_true")

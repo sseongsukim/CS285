@@ -139,7 +139,7 @@ class PGAgent(nn.Module):
                 batch_size = obs.shape[0]
 
                 # HINT: append a dummy T+1 value for simpler recursive calculation
-                valutes = np.append(values, [0])
+                values = np.append(values, [0])
                 advantages = np.zeros(batch_size + 1)
 
                 for i in reversed(range(batch_size)):

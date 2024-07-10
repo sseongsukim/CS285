@@ -54,7 +54,8 @@ def run_training_loop(args):
     if use_wandb:
         now = time.time()
         year, mon, mday, minute = gmtime(now).tm_year, gmtime(now).tm_mon, gmtime(now).tm_mday, gmtime(now).tm_min
-        index = f"{args.env_name}_{int(mon)}-{int(mday)}-{int(minute)}_use_reward_to_go_{args.use_reward_to_go}_normalize_advantages_{args.normalize_advantages}_batch_size_{args.batch_size}_baseline_{args.use_baseline}"
+        sc = gmtime(now).tm_sec
+        index = f"{args.env_name}_{int(mon)}-{int(mday)}-{int(minute)}_{int(sc)}_use_reward_to_go_{args.use_reward_to_go}_normalize_advantages_{args.normalize_advantages}_batch_size_{args.batch_size}_baseline_{args.use_baseline}_{args.gae_lambda}"
         log_dir = Path('wandb_log').expanduser() / index
         Path(log_dir).mkdir(parents= True, exist_ok=True)
         video_dir = str(log_dir / 'videos')

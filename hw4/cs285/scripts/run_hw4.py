@@ -10,9 +10,6 @@ from cs285.agents.soft_actor_critic import SoftActorCritic
 from cs285.infrastructure.replay_buffer import ReplayBuffer
 import cs285.env_configs
 
-import os
-import time
-
 import gym
 import numpy as np
 import torch
@@ -25,11 +22,13 @@ from cs285.infrastructure.logger import Logger
 from scripting_utils import make_logger, make_config
 
 import argparse
-
 from cs285.envs import register_envs
-
 register_envs()
 
+import wandb
+from pathlib import Path
+from time import gmtime
+import imageio
 
 def collect_mbpo_rollout(
     env: gym.Env,
@@ -44,6 +43,13 @@ def collect_mbpo_rollout(
         # HINT: get actions from `sac_agent` and `next_ob` predictions from `mb_agent`.
         # Average the ensemble predictions directly to get the next observation.
         # Get the reward using `env.get_reward`.
+        ac = sac_agent.get_action(observation= ob)
+        next_ob = []
+        for i in range(mb_agent.ensemble_size):
+            pred_next_ob = mb_agent.get_dynamics_predictions(i= i, obs= ob, acs= ac)
+            next_ob.append(pred_next_ob)
+        next_ob = np.array(next_ob).mean(axis= 0)
+        rew, _ = env.get_reward(next_ob, ac)
 
         obs.append(ob)
         acs.append(ac)
@@ -90,6 +96,29 @@ def run_training_loop(
     else:
         fps = 2
 
+    # Wandb
+    use_wandb = False
+    config_name = args.config_file
+    config_name = config_name.split("/")[-1]
+    if use_wandb:
+        now = time.time()
+        year, mon, mday, minute = gmtime(now).tm_year, gmtime(now).tm_mon, gmtime(now).tm_mday, gmtime(now).tm_min
+        index = f"hw4_{config_name}_{int(mon)}-{int(mday)}-{int(minute)}_{args.seed}"
+        log_dir = Path('wandb_log').expanduser() / index
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
+        video_dir = str(log_dir / 'videos')
+        Path(video_dir).mkdir(exist_ok=True)
+        wandb.init(
+            entity="goto-rl",
+            project="hw4",
+            resume=index,
+            config=vars(args),
+            dir=log_dir,
+            mode='online'
+        )
+        wandb.save()
+
+
     # initialize agent
     mb_agent = ModelBasedAgent(
         env,
@@ -119,10 +148,20 @@ def run_training_loop(
         if itr == 0:
             # TODO(student): collect at least config["initial_batch_size"] transitions with a random policy
             # HINT: Use `utils.RandomPolicy` and `utils.sample_trajectories`
-            trajs, envsteps_this_batch = ...
+            trajs, envsteps_this_batch = utils.sample_trajectories(
+                env= env,
+                policy= utils.RandomPolicy(env= env),
+                min_timesteps_per_batch= config["initial_batch_size"],
+                max_length= ep_len
+            )
         else:
             # TODO(student): collect at least config["batch_size"] transitions with our `actor_agent`
-            trajs, envsteps_this_batch = ...
+            trajs, envsteps_this_batch = utils.sample_trajectories(
+                env= env,
+                policy= actor_agent,
+                min_timesteps_per_batch= config["train_batch_size"],
+                max_length= ep_len
+            )
 
         total_envsteps += envsteps_this_batch
         logger.log_scalar(total_envsteps, "total_envsteps", itr)
@@ -165,6 +204,16 @@ def run_training_loop(
             # TODO(student): train the dynamics models
             # HINT: train each dynamics model in the ensemble with a *different* batch of transitions!
             # Use `replay_buffer.sample` with config["train_batch_size"].
+            for i in range(mb_agent.ensemble_size):
+                batch = replay_buffer.sample(batch_size= config["train_batch_size"])
+                dynamics_loss = mb_agent.update(
+                    i= i,
+                    obs= batch["observations"],
+                    acs = batch["actions"],
+                    next_obs= batch["next_observations"],
+                )
+                step_losses.append(dynamics_loss)
+
             all_losses.append(np.mean(step_losses))
 
         # on iteration 0, plot the full learning curve
@@ -173,11 +222,13 @@ def run_training_loop(
             plt.title("Iteration 0: Dynamics Model Training Loss")
             plt.ylabel("Loss")
             plt.xlabel("Step")
-            plt.savefig(os.path.join(logger._log_dir, "itr_0_loss_curve.png"))
+            plt.savefig(os.path.join(logger._log_dir, "itr_0_loss_curve_hidden64.png"))
 
         # log the average loss
         loss = np.mean(all_losses)
         logger.log_scalar(loss, "dynamics_loss", itr)
+        if use_wandb:
+            wandb.log({"train/loss": loss}, step= itr)
 
         # for MBPO: now we need to train the SAC agent
         if sac_config is not None:
@@ -206,11 +257,11 @@ def run_training_loop(
                 # train SAC
                 batch = sac_replay_buffer.sample(sac_config["batch_size"])
                 sac_agent.update(
-                    batch["observations"],
-                    batch["actions"],
-                    batch["rewards"],
-                    batch["next_observations"],
-                    batch["dones"],
+                    ptu.from_numpy(batch["observations"]),
+                    ptu.from_numpy(batch["actions"]),
+                    ptu.from_numpy(batch["rewards"]),
+                    ptu.from_numpy(batch["next_observations"]),
+                    ptu.from_numpy(batch["dones"]),
                     i,
                 )
 
@@ -230,6 +281,9 @@ def run_training_loop(
         logger.log_scalar(np.mean(returns), "eval_return", itr)
         logger.log_scalar(np.mean(ep_lens), "eval_ep_len", itr)
         print(f"Average eval return: {np.mean(returns)}")
+        if use_wandb:
+            wandb.log({"train/eval_return", np.mean(returns)}, step= itr)
+            wandb.log({"train/eval_ep_len", np.mean(ep_lens)}, step=itr)
 
         if len(returns) > 1:
             logger.log_scalar(np.std(returns), "eval/return_std", itr)
@@ -238,6 +292,13 @@ def run_training_loop(
             logger.log_scalar(np.std(ep_lens), "eval/ep_len_std", itr)
             logger.log_scalar(np.max(ep_lens), "eval/ep_len_max", itr)
             logger.log_scalar(np.min(ep_lens), "eval/ep_len_min", itr)
+            if use_wandb:
+                wandb.log({"eval/return_std": np.std(returns)}, step= itr)
+                wandb.log({"eval/return_max": np.max(returns)}, step= itr)
+                wandb.log({"eval/return_min": np.min(returns)}, step= itr)
+                wandb.log({"eval/ep_len_std": np.std(ep_lens)}, step= itr)
+                wandb.log({"eval/ep_len_max": np.max(ep_lens)}, step= itr)
+                wandb.log({"eval/ep_len_min": np.min(ep_lens)}, step= itr)
 
             if args.num_render_trajectories > 0:
                 video_trajectories = utils.sample_n_trajectories(
@@ -247,6 +308,14 @@ def run_training_loop(
                     ep_len,
                     render=True,
                 )
+                if use_wandb:
+                    length = len(video_trajectories)
+                    for i in range(length):
+                        videos = video_trajectories[i]["image_obs"]
+                        video_file_name = f'{video_dir}/iteration_{step}_{i + 1}.mp4'
+                        imageio.mimsave(video_file_name, videos, fps=30)
+                        wandb.log({f"video_{i}": wandb.Video(video_file_name, fps=4, format="mp4")})
+
 
                 logger.log_paths_as_videos(
                     video_trajectories,
@@ -256,14 +325,13 @@ def run_training_loop(
                     video_title="eval_rollouts",
                 )
 
-
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file", "-cfg", type=str, required=True)
+    parser.add_argument("--config_file", "-cfg", type=str, required=False, default= "experiments/mpc/halfcheetah_0_iter.yaml")
     parser.add_argument("--sac_config_file", type=str, default=None)
 
     parser.add_argument("--eval_interval", "-ei", type=int, default=5000)
-    parser.add_argument("--num_render_trajectories", "-nvid", type=int, default=0)
+    parser.add_argument("--num_render_trajectories", "-nvid", type=int, default=1)
 
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--no_gpu", "-ngpu", action="store_true")

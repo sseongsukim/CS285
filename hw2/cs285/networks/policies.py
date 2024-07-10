@@ -98,7 +98,6 @@ class MLPPolicyPG(MLPPolicy):
         actions = ptu.from_numpy(actions)
         advantages = ptu.from_numpy(advantages)
 
-
         # TODO: implement the policy gradient actor update.
         action_distribution = self.forward(obs)
         log_probs = action_distribution.log_prob(actions)

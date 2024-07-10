@@ -25,6 +25,20 @@ def sample_trajectory(
                 img = env.sim.render(camera_name="track", height=500, width=500)[::-1]
             else:
                 img = env.render(mode="rgb_array")
+
+            if img.sum() == 0:
+                count = 0
+                while True:
+                    ob = env.reset()
+                    if count % 2 == 0:
+                        img = env.render('rgb_array')
+                    else:
+                        img = env.render()
+                    count += 1
+                    if img is not None:
+                        if img.sum() != 0:
+                            break
+
             image_obs.append(img)
 
         # TODO use the most recent ob and the policy to decide what to do

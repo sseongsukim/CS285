@@ -39,7 +39,7 @@ def sample_trajectory(
                 img = img[0]
 
             image_obs.append(
-                cv2.resize(img, dsize=(250, 250), interpolation=cv2.INTER_CUBIC)
+                cv2.resize(img, dsize=(256, 256), interpolation=cv2.INTER_CUBIC)
             )
 
         ac = policy.get_action(ob)

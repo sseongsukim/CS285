@@ -60,6 +60,7 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
     env = config["make_env"]()
     eval_env = config["make_env"]()
     render_env = config["make_env"](render=True)
+    print(config)
     exploration_schedule = config["exploration_schedule"]
     discrete = isinstance(env.action_space, gym.spaces.Discrete)
 

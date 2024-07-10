@@ -207,7 +207,7 @@ class SoftActorCritic(nn.Module):
 
             if self.use_entropy_bonus and self.backup_entropy:
                 # TODO(student): Add entropy bonus to the target values for SAC
-                next_action_entropy = self.entropy(action_distribution= next_action_distribution).expand_as(next_qs)
+                next_action_entropy = self.entropy(action_distribution= next_action_distribution)
                 next_qs += self.temperature * next_action_entropy
 
             # Compute the target Q-value
@@ -245,8 +245,8 @@ class SoftActorCritic(nn.Module):
 
         # TODO(student): Compute the entropy of the action distribution.
         # Note: Think about whether to use .rsample() or .sample() here...
-        samples = action_distribution.rsample(sample_shape= (self.num_actor_samples,))
-        log_probs = action_distribution.log_prob(samples).mean(dim= 0)
+        samples = action_distribution.rsample()
+        log_probs = action_distribution.log_prob(samples).mean(dim= -1)
         return -log_probs
 
     def actor_loss_reinforce(self, obs: torch.Tensor):
@@ -257,7 +257,7 @@ class SoftActorCritic(nn.Module):
 
         with torch.no_grad():
             # TODO(student): draw num_actor_samples samples from the action distribution for each batch element
-            action = action_distribution.sample(sample_shape= (self.num_actor_samples,))
+            action = action_distribution.rsample(sample_shape= (self.num_actor_samples,))
             assert action.shape == (
                 self.num_actor_samples,
                 batch_size,
@@ -266,7 +266,7 @@ class SoftActorCritic(nn.Module):
 
             # TODO(student): Compute Q-values for the current state-action pair
             q_values = self.critic(
-                obs= obs.unsqueeze(0),
+                obs= torch.stack([obs] * self.num_actor_samples),
                 action= action,
             )
             assert q_values.shape == (
@@ -294,11 +294,11 @@ class SoftActorCritic(nn.Module):
 
         # TODO(student): Sample actions
         # Note: Think about whether to use .rsample() or .sample() here...
-        action = action_distribution.rsample(sample_shape= (self.num_actor_samples,))
+        action = action_distribution.rsample()
 
         # TODO(student): Compute Q-values for the sampled state-action pair
         q_values = self.critic(
-            obs= obs.unsqueeze(0),
+            obs= obs,
             action= action,
         )
 
@@ -320,7 +320,8 @@ class SoftActorCritic(nn.Module):
         # Add entropy if necessary
         if self.use_entropy_bonus:
             loss -= self.temperature * entropy
-
+        if loss < -25:
+            print(loss)
         self.actor_optimizer.zero_grad()
         loss.backward()
         self.actor_optimizer.step()
