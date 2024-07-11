@@ -169,17 +169,17 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
                 "eval"
             )
 
-
     # Save the final dataset
     dataset_file = os.path.join(args.dataset_dir, f"{config['dataset_name']}.pkl")
     with open(dataset_file, "wb") as f:
         pickle.dump(replay_buffer, f)
         print("Saved dataset to", dataset_file)
-    
+
     # Render final heatmap
     fig = visualize(env_pointmass, agent, replay_buffer.observations[:config["total_steps"]])
     fig.suptitle("State coverage")
-    filename = os.path.join("exploration_visualization", f"{config['log_name']}.png")
+    log_name = config["log_name"]
+    filename = f"datasets/figures/{log_name}.png"
     fig.savefig(filename)
     print("Saved final heatmap to", filename)
 

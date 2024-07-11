@@ -70,7 +70,7 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
         if step % args.log_interval == 0:
             for k, v in metrics.items():
                 logger.log_scalar(v, k, step)
-        
+
         if step % args.eval_interval == 0:
             # Evaluate
             trajectories = utils.sample_n_trajectories(
